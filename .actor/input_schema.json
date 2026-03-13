@@ -1,0 +1,74 @@
+{
+    "title": "Global Climate & Sustainability B2B Lead Finder",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "seeds": {
+            "title": "Seed sources",
+            "type": "array",
+            "description": "Company homepages, search result pages, or directory/listing URLs to start crawling from.",
+            "editor": "stringList",
+            "items": {
+                "type": "string"
+            }
+        },
+        "maxDepth": {
+            "title": "Max crawl depth",
+            "type": "integer",
+            "description": "Maximum crawl depth from each seed domain.",
+            "default": 2,
+            "minimum": 0
+        },
+        "maxCompanies": {
+            "title": "Max companies",
+            "type": "integer",
+            "description": "Hard limit on number of company records to output.",
+            "default": 1000,
+            "minimum": 1
+        },
+        "includeJobPages": {
+            "title": "Include job pages",
+            "type": "boolean",
+            "description": "Whether to search for ESG‑related jobs on company career pages.",
+            "default": true
+        },
+        "includeReports": {
+            "title": "Include reports",
+            "type": "boolean",
+            "description": "Whether to look for ESG/sustainability report PDFs.",
+            "default": true
+        },
+        "proxyConfiguration": {
+            "title": "Proxy configuration",
+            "type": "object",
+            "description": "Select proxies to be used by your crawler.",
+            "prefill": { "useApifyProxy": true },
+            "editor": "proxy"
+        },
+        "languages": {
+            "title": "Languages",
+            "type": "array",
+            "description": "Preferred languages (e.g., ['en', 'de', 'fr']) to prioritize when scanning text.",
+            "editor": "stringList",
+            "items": {
+                "type": "string"
+            }
+        },
+        "minScore": {
+            "title": "Minimum intent score",
+            "type": "number",
+            "description": "Minimum 'sustainability intent score' to include a company in output (0–100).",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 100
+        },
+        "maxConcurrency": {
+            "title": "Max concurrency",
+            "type": "integer",
+            "description": "Maximum request queue concurrency.",
+            "default": 20,
+            "minimum": 1
+        }
+    },
+    "required": ["seeds"]
+}

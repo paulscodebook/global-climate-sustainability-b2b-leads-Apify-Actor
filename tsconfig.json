@@ -1,0 +1,16 @@
+{
+  "extends": "@apify/tsconfig",
+  "compilerOptions": {
+    "outDir": "dist",
+    "module": "ES2022",
+    "moduleResolution": "node",
+    "target": "ES2022",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "src/**/*"
+  ]
+}

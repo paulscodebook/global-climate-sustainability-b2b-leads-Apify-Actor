@@ -1,0 +1,12 @@
+{
+    "actorSpecification": 1,
+    "name": "global-climate-sustainability-b2b-leads",
+    "title": "Global Climate & Sustainability B2B Leads",
+    "description": "Discovers and enriches B2B leads for companies with clear sustainability / ESG activity, and outputs structured JSON/CSV.",
+    "version": "1.0",
+    "meta": {
+        "templateId": "ts-crawlee-cheerio"
+    },
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile"
+}
