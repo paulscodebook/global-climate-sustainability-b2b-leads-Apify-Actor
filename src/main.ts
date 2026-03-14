@@ -196,6 +196,7 @@ const crawler = new CheerioCrawler({
         }
 
         const url = request.loadedUrl || request.url;
+        const urlLower = url.toLowerCase();
         const basicDomain = getRootDomain(url);
         const domain = getDomain(url) || basicDomain;
         const depth = request.userData.depth || 0;
@@ -360,7 +361,6 @@ const crawler = new CheerioCrawler({
         }
 
         // 8. Contact & Socials
-        const urlLower = url.toLowerCase();
         const contactKeywords = ['/contact', '/contact-us', '/contactus', '/get-in-touch', '/support'];
         if (contactKeywords.some(kw => urlLower.includes(kw))) {
             if (!record.contact.contactPageUrls.includes(url)) {
