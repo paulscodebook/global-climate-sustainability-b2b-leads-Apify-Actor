@@ -1,5 +1,6 @@
 import { Actor } from 'apify';
 import { CheerioCrawler, RequestQueue, log, EnqueueStrategy } from 'crawlee';
+import { getDomain } from 'tldts';
 
 // --- Types ---
 interface InputSchema {
@@ -94,7 +95,33 @@ const createEmptyRecord = (domain: string, rootUrl: string): CompanyRecord => ({
     lastUpdatedAt: new Date().toISOString(),
 });
 
-const calculateScore = (record: CompanyRecord): number => {
+const extractCompanyName = ($: any, titleText: string | null): string | null => {
+    let name = $('meta[property="og:site_name"]').attr('content') || 
+               $('meta[property="og:title"]').attr('content') || 
+               titleText || 
+               $('h1').first().text() || 
+               null;
+    
+    if (!name) return null;
+    
+    name = name.trim();
+    name = name.replace(/burger|chevron( left| right)?|ellipses|logo(50th)?|pro logo|navigation( primary)?( cart| hamburger| profile| search| wishlist| x)?|Loading \.\.\.|play|search|shopping bag( filled)?|x/gi, '');
+    
+    const parts = name.split(/[-|]/);
+    if (parts.length > 1) {
+        name = parts[0].trim();
+    }
+    
+    name = name.replace(/\s+/g, ' ').trim();
+    
+    if (name.length > 120) {
+        name = name.substring(0, 120).trim();
+    }
+    
+    return name || null;
+};
+
+const computeSustainabilityScore = (record: CompanyRecord): number => {
     let score = 0;
     if (record.sustainabilityPages.length > 0) score += 20;
     if (record.reports.length > 0) score += 20;
@@ -107,7 +134,6 @@ const calculateScore = (record: CompanyRecord): number => {
 };
 
 // --- Detection Logic ---
-const SUSTAINABILITY_URL_KEYWORDS = ['sustainability', 'esg', 'csr', 'impact', 'responsibility', 'climate', 'net-zero', 'decarbonization', 'environment', 'reports', 'sustainability-report'];
 const REPORT_PDF_KEYWORDS = ['sustainability report', 'esg report', 'integrated report', 'non-financial report', 'non‑financial report', 'corporate responsibility report'];
 const CERTIFICATIONS = ['GRI', 'CDP', 'TCFD', 'SASB', 'UN Global Compact', 'UNGC', 'ISO 14001', 'SBTi'];
 const ESG_JOB_KEYWORDS = ['sustainability', 'esg', 'climate', 'decarbonization', 'impact', 'responsible sourcing', 'sustainable finance'];
@@ -159,7 +185,8 @@ const crawler = new CheerioCrawler({
         }
 
         const url = request.loadedUrl || request.url;
-        const domain = getRootDomain(url);
+        const basicDomain = getRootDomain(url);
+        const domain = getDomain(url) || basicDomain;
         const depth = request.userData.depth || 0;
         
         // Initialize record if missing
@@ -172,12 +199,12 @@ const crawler = new CheerioCrawler({
         const title = $('title').text().trim() || null;
         const pageText = $('body').text().replace(/\s+/g, ' ').toLowerCase();
 
-        // 1. Basic Company Info Extraction (Only once per domain or if empty)
-        if (!record.companyName) {
-            record.companyName = $('meta[property="og:site_name"]').attr('content') || 
-                                 title?.split(/[-|]/)[0].trim() || 
-                                 $('h1').first().text().trim() || 
-                                 null;
+        // 1. Basic Company Info Extraction
+        const newName = extractCompanyName($, title);
+        if (newName && !record.companyName) {
+            record.companyName = newName;
+        } else if (newName && record.companyName && newName.length < record.companyName.length && newName.length > 2) {
+            record.companyName = newName;
         }
 
         // Extremely simple country guess from footer (In a real app, use a proper NER library)
@@ -194,12 +221,30 @@ const crawler = new CheerioCrawler({
 
         // 2. Sustainability Page Detection
         const urlLower = url.toLowerCase();
-        const isSustPage = SUSTAINABILITY_URL_KEYWORDS.some(kw => urlLower.includes(kw));
-        
-        // Check for strong text signals
-        const hasEsgLanguage = ['sustainability', 'esg', 'corporate responsibility', 'carbon footprint'].some(kw => pageText.includes(kw));
-        
-        if (isSustPage || (depth > 0 && hasEsgLanguage)) {
+        let isSustPage = false;
+        try {
+            const u = new URL(url);
+            const path = u.pathname.toLowerCase();
+            const exactSlugs = ['/sustainability', '/our-footprint', '/our-footprint/', '/responsibility', '/csr', '/impact', '/esg', '/environment', '/social-responsibility', '/corporate-responsibility'];
+            const avoidSlugs = ['/shop/', '/product/', '/collections/', '/products/'];
+            
+            const hasAvoidSlug = avoidSlugs.some(slug => path.includes(slug));
+            const hasExactSlug = exactSlugs.some(slug => path === slug || path === slug + '/' || path.includes(slug));
+            
+            if (hasExactSlug) {
+                isSustPage = !hasAvoidSlug || exactSlugs.some(slug => path.endsWith(slug) || path.endsWith(slug + '/'));
+            } else if (!hasAvoidSlug) {
+                const pathKeywords = ['sustainability', 'esg', 'csr', 'impact', 'climate', 'net-zero', 'decarbonization'];
+                if (pathKeywords.some(kw => path.includes(kw))) {
+                    const headingText = $('h1, h2, h3').text().toLowerCase();
+                    if (pathKeywords.some(kw => headingText.includes(kw))) {
+                        isSustPage = true;
+                    }
+                }
+            }
+        } catch (e) { }
+
+        if (isSustPage) {
              if (!record.sustainabilityPages.some(p => p.url === url)) {
                  record.sustainabilityPages.push({ url, title });
              }
@@ -275,6 +320,56 @@ const crawler = new CheerioCrawler({
             });
         }
 
+        // 8. Contact & Socials
+        const contactKeywords = ['/contact', '/contact-us', '/contactus', '/get-in-touch', '/support'];
+        if (contactKeywords.some(kw => urlLower.includes(kw))) {
+            if (!record.contact.contactPageUrls.includes(url)) {
+                record.contact.contactPageUrls.push(url);
+            }
+        }
+        
+        $('a').each((_, el) => {
+            const href = $(el).attr('href');
+            if (!href) return;
+            const hrefLower = href.toLowerCase();
+            
+            if (contactKeywords.some(kw => hrefLower.includes(kw))) {
+                try {
+                     const cUrl = new URL(href, url).href;
+                     if (getDomain(cUrl) === domain && !record.contact.contactPageUrls.includes(cUrl)) {
+                         record.contact.contactPageUrls.push(cUrl);
+                     }
+                } catch { }
+            }
+            
+            if (hrefLower.startsWith('mailto:')) {
+                const em = hrefLower.replace('mailto:', '').split('?')[0].trim();
+                if (em.includes('@') && !record.contact.emails.includes(em)) {
+                    record.contact.emails.push(em);
+                }
+            }
+            
+            if (hrefLower.includes('linkedin.com/company')) {
+                if (!record.social.linkedin) record.social.linkedin = href;
+            } else if (hrefLower.includes('twitter.com') || hrefLower.includes('x.com')) {
+                if (!record.social.twitter && !hrefLower.includes('/share') && !hrefLower.includes('/status')) record.social.twitter = href;
+            } else if (hrefLower.includes('facebook.com')) {
+                if (!record.social.facebook && !hrefLower.includes('/sharer')) record.social.facebook = href;
+            }
+        });
+        
+        const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/g;
+        const emMatch = $('body').text().match(emailRegex);
+        if (emMatch) {
+            for (const em of emMatch) {
+                const cleanEm = em.toLowerCase();
+                if (cleanEm.endsWith('.png') || cleanEm.endsWith('.jpg') || cleanEm.endsWith('.gif')) continue;
+                if (!record.contact.emails.includes(cleanEm)) {
+                     record.contact.emails.push(cleanEm);
+                }
+            }
+        }
+
         // 7. Enqueue Links for deeper crawl
         if (depth < maxDepth && !isJobPage && !isSustPage) { // don't crawl deep from within job/sust pages to save requests
              await enqueueLinks({
@@ -309,7 +404,7 @@ log.info('Crawl finished. Processing and exporting valid records...');
 // Post-crawl processing: Score and Filter
 const recordsToPush = [];
 for (const record of companiesMap.values()) {
-    record.sustainabilityIntentScore = calculateScore(record);
+    record.sustainabilityIntentScore = computeSustainabilityScore(record);
     
     if (record.sustainabilityIntentScore >= minScore) {
         recordsToPush.push(record);
