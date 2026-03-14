@@ -95,7 +95,7 @@ const createEmptyRecord = (domain: string, rootUrl: string): CompanyRecord => ({
     lastUpdatedAt: new Date().toISOString(),
 });
 
-const extractCompanyName = ($: any, titleText: string | null): string | null => {
+const extractCompanyNameFromDocument = ($: any, titleText: string | null): string | null => {
     let name = $('meta[property="og:site_name"]').attr('content') || 
                $('meta[property="og:title"]').attr('content') || 
                titleText || 
@@ -105,7 +105,7 @@ const extractCompanyName = ($: any, titleText: string | null): string | null => 
     if (!name) return null;
     
     name = name.trim();
-    name = name.replace(/burger|chevron( left| right)?|ellipses|logo(50th)?|pro logo|navigation( primary)?( cart| hamburger| profile| search| wishlist| x)?|Loading \.\.\.|play|search|shopping bag( filled)?|x/gi, '');
+    name = name.replace(/Hang Tight!?|Routing to checkout(\.\.\.)?|burger|chevron( left| right)?|ellipses|logo(50th)?|pro logo|navigation( primary)?( cart| hamburger| profile| search| wishlist| x)?|Loading(\s*\.\.\.)?|play|search|shopping bag( filled)?|x|menu/gi, '');
     
     const parts = name.split(/[-|]/);
     if (parts.length > 1) {
@@ -120,6 +120,17 @@ const extractCompanyName = ($: any, titleText: string | null): string | null => 
     
     return name || null;
 };
+
+const normalizeEmail = (email: string): string | null => {
+    let clean = email.trim();
+    clean = clean.replace(/[.,;:\s]+$/, '');
+    const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+(\.[a-zA-Z0-9._-]+)+$/;
+    if (emailRegex.test(clean)) {
+        return clean.toLowerCase();
+    }
+    return null;
+};
+
 
 const computeSustainabilityScore = (record: CompanyRecord): number => {
     let score = 0;
@@ -200,11 +211,14 @@ const crawler = new CheerioCrawler({
         const pageText = $('body').text().replace(/\s+/g, ' ').toLowerCase();
 
         // 1. Basic Company Info Extraction
-        const newName = extractCompanyName($, title);
-        if (newName && !record.companyName) {
-            record.companyName = newName;
-        } else if (newName && record.companyName && newName.length < record.companyName.length && newName.length > 2) {
-            record.companyName = newName;
+        // Only prioritize homepage for the name
+        if (depth === 0 || !record.companyName) {
+            const newName = extractCompanyNameFromDocument($, title);
+            if (newName && (depth === 0 || !record.companyName)) {
+                record.companyName = newName;
+            } else if (newName && record.companyName && newName.length < record.companyName.length && newName.length > 2) {
+                record.companyName = newName;
+            }
         }
 
         // Extremely simple country guess from footer (In a real app, use a proper NER library)
@@ -219,35 +233,60 @@ const crawler = new CheerioCrawler({
             }
         }
 
-        // 2. Sustainability Page Detection
-        const urlLower = url.toLowerCase();
-        let isSustPage = false;
-        try {
-            const u = new URL(url);
-            const path = u.pathname.toLowerCase();
-            const exactSlugs = ['/sustainability', '/our-footprint', '/our-footprint/', '/responsibility', '/csr', '/impact', '/esg', '/environment', '/social-responsibility', '/corporate-responsibility'];
-            const avoidSlugs = ['/shop/', '/product/', '/collections/', '/products/'];
-            
+        // Helper to check if a path is a sustainability page
+        const isSustainabilityPath = (path: string, exactSlugs: string[], avoidSlugs: string[], pathKeywords: string[], headingsText?: string): boolean => {
             const hasAvoidSlug = avoidSlugs.some(slug => path.includes(slug));
             const hasExactSlug = exactSlugs.some(slug => path === slug || path === slug + '/' || path.includes(slug));
             
             if (hasExactSlug) {
-                isSustPage = !hasAvoidSlug || exactSlugs.some(slug => path.endsWith(slug) || path.endsWith(slug + '/'));
-            } else if (!hasAvoidSlug) {
-                const pathKeywords = ['sustainability', 'esg', 'csr', 'impact', 'climate', 'net-zero', 'decarbonization'];
+                return !hasAvoidSlug || exactSlugs.some(slug => path.endsWith(slug) || path.endsWith(slug + '/'));
+            } else if (!hasAvoidSlug && headingsText) {
                 if (pathKeywords.some(kw => path.includes(kw))) {
-                    const headingText = $('h1, h2, h3').text().toLowerCase();
-                    if (pathKeywords.some(kw => headingText.includes(kw))) {
-                        isSustPage = true;
+                    if (pathKeywords.some(kw => headingsText.includes(kw))) {
+                        return true;
                     }
                 }
             }
+            return false;
+        };
+
+        const exactSlugs = ['/sustainability', '/our-footprint', '/our-footprint/', '/responsibility', '/csr', '/impact', '/esg', '/environment', '/social-responsibility', '/corporate-responsibility', '/climate', '/planet'];
+        const avoidSlugs = ['/shop/', '/product/', '/products/', '/collections/'];
+        const pathKeywords = ['sustainability', 'esg', 'csr', 'impact', 'climate', 'net-zero', 'decarbonization', 'planet'];
+
+        // 2. Sustainability Page Detection (Current URL)
+        let isSustPage = false;
+        try {
+            const u = new URL(url);
+            isSustPage = isSustainabilityPath(u.pathname.toLowerCase(), exactSlugs, avoidSlugs, pathKeywords, $('h1, h2, h3').text().toLowerCase());
         } catch (e) { }
 
         if (isSustPage) {
-             if (!record.sustainabilityPages.some(p => p.url === url)) {
-                 record.sustainabilityPages.push({ url, title });
+             const u = new URL(url);
+             if (getDomain(u.href) === domain || getRootDomain(u.href) === basicDomain) {
+                 if (!record.sustainabilityPages.some(p => p.url === url)) {
+                     record.sustainabilityPages.push({ url, title });
+                 }
              }
+        }
+
+        // Crawl nav/footer links on homepage explicitly for sustainability pages
+        if (depth === 0) {
+            $('a').each((_, el) => {
+                const href = $(el).attr('href');
+                if (!href) return;
+                try {
+                    const linkUrl = new URL(href, url);
+                    if (getDomain(linkUrl.href) === domain || getRootDomain(linkUrl.href) === basicDomain) {
+                        const path = linkUrl.pathname.toLowerCase();
+                        if (isSustainabilityPath(path, exactSlugs, avoidSlugs, pathKeywords)) {
+                             if (!record.sustainabilityPages.some(p => p.url === linkUrl.href)) {
+                                 record.sustainabilityPages.push({ url: linkUrl.href, title: $(el).text().trim() || null });
+                             }
+                        }
+                    }
+                } catch(e) {}
+            });
         }
 
         // 3. Certifications
@@ -321,6 +360,7 @@ const crawler = new CheerioCrawler({
         }
 
         // 8. Contact & Socials
+        const urlLower = url.toLowerCase();
         const contactKeywords = ['/contact', '/contact-us', '/contactus', '/get-in-touch', '/support'];
         if (contactKeywords.some(kw => urlLower.includes(kw))) {
             if (!record.contact.contactPageUrls.includes(url)) {
@@ -343,17 +383,18 @@ const crawler = new CheerioCrawler({
             }
             
             if (hrefLower.startsWith('mailto:')) {
-                const em = hrefLower.replace('mailto:', '').split('?')[0].trim();
-                if (em.includes('@') && !record.contact.emails.includes(em)) {
-                    record.contact.emails.push(em);
+                const emStr = hrefLower.replace('mailto:', '').split('?')[0];
+                const cleanEm = normalizeEmail(emStr);
+                if (cleanEm && !record.contact.emails.includes(cleanEm)) {
+                    record.contact.emails.push(cleanEm);
                 }
             }
             
-            if (hrefLower.includes('linkedin.com/company')) {
+            if (hrefLower.includes('linkedin.com/')) {
                 if (!record.social.linkedin) record.social.linkedin = href;
-            } else if (hrefLower.includes('twitter.com') || hrefLower.includes('x.com')) {
+            } else if (hrefLower.includes('twitter.com/') || hrefLower.includes('x.com/')) {
                 if (!record.social.twitter && !hrefLower.includes('/share') && !hrefLower.includes('/status')) record.social.twitter = href;
-            } else if (hrefLower.includes('facebook.com')) {
+            } else if (hrefLower.includes('facebook.com/')) {
                 if (!record.social.facebook && !hrefLower.includes('/sharer')) record.social.facebook = href;
             }
         });
@@ -361,11 +402,13 @@ const crawler = new CheerioCrawler({
         const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/g;
         const emMatch = $('body').text().match(emailRegex);
         if (emMatch) {
-            for (const em of emMatch) {
-                const cleanEm = em.toLowerCase();
-                if (cleanEm.endsWith('.png') || cleanEm.endsWith('.jpg') || cleanEm.endsWith('.gif')) continue;
-                if (!record.contact.emails.includes(cleanEm)) {
-                     record.contact.emails.push(cleanEm);
+            for (const emStr of emMatch) {
+                const cleanEm = normalizeEmail(emStr);
+                if (cleanEm) {
+                    if (cleanEm.endsWith('.png') || cleanEm.endsWith('.jpg') || cleanEm.endsWith('.gif')) continue;
+                    if (!record.contact.emails.includes(cleanEm)) {
+                         record.contact.emails.push(cleanEm);
+                    }
                 }
             }
         }
