@@ -299,15 +299,18 @@ const crawler = new CheerioCrawler({
         }
 
         // 4. Net Zero Commitment
-        if (!record.netZeroCommitment.hasCommitment && (isSustPage || depth === 0)) {
-            if (pageText.includes('net zero') || pageText.includes('net-zero') || pageText.includes('science based target') || pageText.includes('sbti') || pageText.includes('decarbonization')) {
+        const netZeroPhrases = ['net zero', 'net-zero', 'science based target', 'sbti', 'decarbonization'];
+        const hasNetZeroPhrase = netZeroPhrases.some(phrase => pageText.includes(phrase));
+
+        if (hasNetZeroPhrase && (isSustPage || depth === 0)) {
+            if (!record.netZeroCommitment.hasCommitment || !record.netZeroCommitment.targetYear) {
                 record.netZeroCommitment.hasCommitment = true;
                 record.netZeroCommitment.sourceUrl = url;
-                // Attempt to find a year near 'net zero'
+                
                 const match = pageText.match(/(?:net zero|net-zero|science based target|sbti|decarbonization).{0,50}\b(20[2-5][0-9])\b/i);
                 if (match && match[1]) {
                     record.netZeroCommitment.targetYear = parseInt(match[1], 10);
-                } else {
+                } else if (!record.netZeroCommitment.targetYear) {
                     record.netZeroCommitment.targetYear = extractYear(pageText); // fallback
                 }
             }
@@ -411,13 +414,15 @@ const crawler = new CheerioCrawler({
         const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/g;
         const emMatch = $('body').text().match(emailRegex);
         if (emMatch) {
-            const genericPrefixes = ['support@', 'help@', 'info@', 'contact@', 'sales@', 'hello@', 'service@', 'inquiries@', 'customerservice@', 'press@', 'media@', 'takedown@', 'accessibility@'];
+            const genericKeywords = ['support', 'help', 'info', 'contact', 'sales', 'hello', 'service', 'inquiries', 'customerservice', 'customer.service', 'press', 'media', 'takedown', 'accessibility'];
             for (const emStr of emMatch) {
                 const cleanEm = normalizeEmail(emStr);
                 if (cleanEm) {
                     if (cleanEm.endsWith('.png') || cleanEm.endsWith('.jpg') || cleanEm.endsWith('.gif')) continue;
                     
-                    const isGeneric = genericPrefixes.some(p => cleanEm.startsWith(p));
+                    const localPart = cleanEm.split('@')[0];
+                    const isGeneric = genericKeywords.some(kw => localPart.includes(kw));
+                    
                     if (isGeneric || record.contact.emails.length < 3) {
                         if (!record.contact.emails.includes(cleanEm)) {
                              record.contact.emails.push(cleanEm);
