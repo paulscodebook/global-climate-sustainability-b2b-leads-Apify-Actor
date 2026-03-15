@@ -123,7 +123,7 @@ const extractCompanyNameFromDocument = ($: any, titleText: string | null): strin
 
 const normalizeEmail = (email: string): string | null => {
     let clean = email.trim();
-    clean = clean.replace(/[.,;:\s]+$/, '');
+    clean = clean.replace(/[.,;:\s!?]+$/, '');
     const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+(\.[a-zA-Z0-9._-]+)+$/;
     if (emailRegex.test(clean)) {
         return clean.toLowerCase();
@@ -134,18 +134,19 @@ const normalizeEmail = (email: string): string | null => {
 
 const computeSustainabilityScore = (record: CompanyRecord): number => {
     let score = 0;
-    if (record.sustainabilityPages.length > 0) score += 20;
-    if (record.reports.length > 0) score += 20;
+    if (record.sustainabilityPages.length === 1) score += 20;
+    else if (record.sustainabilityPages.length > 1) score += 30;
+    if (record.reports.length > 0) score += 40;
     // Distinct certs
     const uniqueCerts = new Set(record.certifications).size;
-    score += Math.min(uniqueCerts * 10, 30);
-    if (record.netZeroCommitment.hasCommitment) score += 10;
+    score += Math.min(uniqueCerts * 20, 40);
+    if (record.netZeroCommitment.hasCommitment) score += 20;
     score += Math.min(record.esgJobs.length * 5, 20);
     return Math.min(score, 100);
 };
 
 // --- Detection Logic ---
-const REPORT_PDF_KEYWORDS = ['sustainability report', 'esg report', 'integrated report', 'non-financial report', 'non‑financial report', 'corporate responsibility report'];
+const REPORT_PDF_KEYWORDS = ['sustainability report', 'esg report', 'impact report', 'environmental report', 'integrated report', 'non-financial report', 'non‑financial report', 'annual sustainability', 'corporate responsibility report'];
 const CERTIFICATIONS = ['GRI', 'CDP', 'TCFD', 'SASB', 'UN Global Compact', 'UNGC', 'ISO 14001', 'SBTi'];
 const ESG_JOB_KEYWORDS = ['sustainability', 'esg', 'climate', 'decarbonization', 'impact', 'responsible sourcing', 'sustainable finance'];
 const JOB_URL_KEYWORDS = ['careers', 'jobs', 'join-us', 'work-with-us', 'career'];
@@ -298,39 +299,44 @@ const crawler = new CheerioCrawler({
         }
 
         // 4. Net Zero Commitment
-        if (!record.netZeroCommitment.hasCommitment) {
-            if (pageText.includes('net zero') || pageText.includes('net-zero') || pageText.includes('science based target') || pageText.includes('decarbonization')) {
+        if (!record.netZeroCommitment.hasCommitment && (isSustPage || depth === 0)) {
+            if (pageText.includes('net zero') || pageText.includes('net-zero') || pageText.includes('science based target') || pageText.includes('sbti') || pageText.includes('decarbonization')) {
                 record.netZeroCommitment.hasCommitment = true;
                 record.netZeroCommitment.sourceUrl = url;
                 // Attempt to find a year near 'net zero'
-                const match = pageText.match(/net zero( by)? (20[2-5][0-9])/i);
-                if (match && match[2]) {
-                    record.netZeroCommitment.targetYear = parseInt(match[2], 10);
+                const match = pageText.match(/(?:net zero|net-zero|science based target|sbti|decarbonization).{0,50}\b(20[2-5][0-9])\b/i);
+                if (match && match[1]) {
+                    record.netZeroCommitment.targetYear = parseInt(match[1], 10);
                 } else {
                     record.netZeroCommitment.targetYear = extractYear(pageText); // fallback
                 }
             }
         }
 
-        // 5. PDF Reports (if enabled and this is an HTML page linking to PDFs)
-        if (includeReports) {
-            $('a[href$=".pdf"]').each((_, el) => {
+        // 5. Reports (if enabled and this is a sustainability page)
+        if (includeReports && isSustPage) {
+            $('a').each((_, el) => {
                 const href = $(el).attr('href');
                 if (!href) return;
-                const pdfUrl = new URL(href, url).href;
-                const linkText = $(el).text().toLowerCase();
-                
-                const isReport = REPORT_PDF_KEYWORDS.some(kw => linkText.includes(kw) || pdfUrl.toLowerCase().includes(kw.replace(' ', '-')));
-                
-                if (isReport && !record.reports.some(r => r.url === pdfUrl)) {
-                    let typeMatch = REPORT_PDF_KEYWORDS.find(kw => linkText.includes(kw));
-                    record.reports.push({
-                        url: pdfUrl,
-                        title: $(el).text().trim(),
-                        yearGuess: extractYear(linkText) || extractYear(pdfUrl),
-                        type: typeMatch ? typeMatch.replace(/\b\w/g, c => c.toUpperCase()) : 'Sustainability Report'
-                    });
-                }
+                try {
+                    const reportUrl = new URL(href, url).href;
+                    if (reportUrl.match(/\.(png|jpg|jpeg|gif|css|js|woff|svg)$/i)) return;
+                    
+                    const linkText = $(el).text().toLowerCase();
+                    const urlLower = reportUrl.toLowerCase();
+                    
+                    const isReport = REPORT_PDF_KEYWORDS.some(kw => linkText.includes(kw) || urlLower.includes(kw.replace(/ /g, '-')));
+                    
+                    if (isReport && !record.reports.some(r => r.url === reportUrl)) {
+                        let typeMatch = REPORT_PDF_KEYWORDS.find(kw => linkText.includes(kw) || urlLower.includes(kw.replace(/ /g, '-')));
+                        record.reports.push({
+                            url: reportUrl,
+                            title: $(el).text().trim() || null,
+                            yearGuess: extractYear(linkText) || extractYear(urlLower),
+                            type: typeMatch ? typeMatch.replace(/\b\w/g, c => c.toUpperCase()) : 'Sustainability Report'
+                        });
+                    }
+                } catch (e) { /* ignore */ }
             });
         }
 
@@ -390,24 +396,32 @@ const crawler = new CheerioCrawler({
                 }
             }
             
-            if (hrefLower.includes('linkedin.com/')) {
-                if (!record.social.linkedin) record.social.linkedin = href;
-            } else if (hrefLower.includes('twitter.com/') || hrefLower.includes('x.com/')) {
-                if (!record.social.twitter && !hrefLower.includes('/share') && !hrefLower.includes('/status')) record.social.twitter = href;
-            } else if (hrefLower.includes('facebook.com/')) {
-                if (!record.social.facebook && !hrefLower.includes('/sharer')) record.social.facebook = href;
+            const inFooter = $(el).closest('footer').length > 0;
+            if (depth === 0 || inFooter) {
+                if (hrefLower.includes('linkedin.com/')) {
+                    if (!record.social.linkedin) record.social.linkedin = href;
+                } else if (hrefLower.includes('twitter.com/') || hrefLower.includes('x.com/')) {
+                    if (!record.social.twitter && !hrefLower.includes('/share') && !hrefLower.includes('/status')) record.social.twitter = href;
+                } else if (hrefLower.includes('facebook.com/')) {
+                    if (!record.social.facebook && !hrefLower.includes('/sharer')) record.social.facebook = href;
+                }
             }
         });
         
         const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/g;
         const emMatch = $('body').text().match(emailRegex);
         if (emMatch) {
+            const genericPrefixes = ['support@', 'help@', 'info@', 'contact@', 'sales@', 'hello@', 'service@', 'inquiries@', 'customerservice@', 'press@', 'media@', 'takedown@', 'accessibility@'];
             for (const emStr of emMatch) {
                 const cleanEm = normalizeEmail(emStr);
                 if (cleanEm) {
                     if (cleanEm.endsWith('.png') || cleanEm.endsWith('.jpg') || cleanEm.endsWith('.gif')) continue;
-                    if (!record.contact.emails.includes(cleanEm)) {
-                         record.contact.emails.push(cleanEm);
+                    
+                    const isGeneric = genericPrefixes.some(p => cleanEm.startsWith(p));
+                    if (isGeneric || record.contact.emails.length < 3) {
+                        if (!record.contact.emails.includes(cleanEm)) {
+                             record.contact.emails.push(cleanEm);
+                        }
                     }
                 }
             }
