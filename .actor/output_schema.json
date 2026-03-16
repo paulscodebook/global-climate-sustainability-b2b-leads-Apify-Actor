@@ -7,10 +7,7 @@
             "title": "Leads Dataset",
             "type": "array",
             "description": "A dataset containing information about companies and their sustainability efforts.",
-            "storage": {
-                "type": "dataset",
-                "schema": "./dataset_schema.json"
-            }
+            "template": "{{actorRun.defaultDatasetUrl}}"
         }
     }
 }
