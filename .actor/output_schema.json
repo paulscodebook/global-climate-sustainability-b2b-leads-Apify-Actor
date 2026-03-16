@@ -5,7 +5,7 @@
     "properties": {
         "results": {
             "title": "Leads Dataset",
-            "type": "array",
+            "type": "string",
             "description": "A dataset containing information about companies and their sustainability efforts.",
             "template": "{{actorRun.defaultDatasetUrl}}"
         }
