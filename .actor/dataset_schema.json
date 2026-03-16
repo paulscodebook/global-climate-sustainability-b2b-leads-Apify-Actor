@@ -1,0 +1,123 @@
+{
+    "title": "Company Record",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "companyName": {
+            "title": "Company Name",
+            "type": "string",
+            "description": "The name of the company."
+        },
+        "domain": {
+            "title": "Domain",
+            "type": "string",
+            "description": "The primary domain of the company."
+        },
+        "rootUrl": {
+            "title": "Root URL",
+            "type": "string",
+            "format": "uri",
+            "description": "The URL where the crawl for this company started."
+        },
+        "hqCountryGuess": {
+            "title": "HQ Country Guess",
+            "type": "string",
+            "description": "Estimated country of headquarters."
+        },
+        "sustainabilityPages": {
+            "title": "Sustainability Pages",
+            "type": "array",
+            "description": "List of URLs related to sustainability found on the website.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "format": "uri" },
+                    "title": { "type": "string" }
+                }
+            }
+        },
+        "reports": {
+            "title": "Reports",
+            "type": "array",
+            "description": "Sustainability and ESG reports found.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "format": "uri" },
+                    "title": { "type": "string" },
+                    "yearGuess": { "type": "integer" },
+                    "type": { "type": "string" }
+                }
+            }
+        },
+        "certifications": {
+            "title": "Certifications",
+            "type": "array",
+            "description": "List of sustainability certifications detected.",
+            "items": { "type": "string" }
+        },
+        "netZeroCommitment": {
+            "title": "Net Zero Commitment",
+            "type": "object",
+            "properties": {
+                "hasCommitment": { "type": "boolean" },
+                "targetYear": { "type": "integer" },
+                "sourceUrl": { "type": "string", "format": "uri" }
+            }
+        },
+        "esgJobs": {
+            "title": "ESG Jobs",
+            "type": "array",
+            "description": "Recent ESG or sustainability-related job postings found.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string" },
+                    "location": { "type": "string" },
+                    "url": { "type": "string", "format": "uri" },
+                    "sourceDomain": { "type": "string" }
+                }
+            }
+        },
+        "contact": {
+            "title": "Contact Information",
+            "type": "object",
+            "properties": {
+                "emails": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                },
+                "contactPageUrls": {
+                    "type": "array",
+                    "items": { "type": "string", "format": "uri" }
+                }
+            }
+        },
+        "social": {
+            "title": "Social Links",
+            "type": "object",
+            "properties": {
+                "linkedin": { "type": "string", "format": "uri" },
+                "twitter": { "type": "string", "format": "uri" },
+                "facebook": { "type": "string", "format": "uri" }
+            }
+        },
+        "sustainabilityIntentScore": {
+            "title": "Sustainability Intent Score",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Calculated score representing the company's sustainability intent."
+        },
+        "firstSeenAt": {
+            "title": "First Seen At",
+            "type": "string",
+            "format": "date-time"
+        },
+        "lastUpdatedAt": {
+            "title": "Last Updated At",
+            "type": "string",
+            "format": "date-time"
+        }
+    }
+}
