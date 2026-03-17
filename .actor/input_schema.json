@@ -8,6 +8,9 @@
             "type": "array",
             "description": "Company homepages, search result pages, or directory/listing URLs to start crawling from.",
             "editor": "stringList",
+            "prefill": [
+                "https://sustainability.google/"
+            ],
             "items": {
                 "type": "string"
             }
